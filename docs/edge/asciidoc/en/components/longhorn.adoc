@@ -1,0 +1,363 @@
+[#components-suse-storage]
+= https://www.suse.com/products/rancher/storage/[SUSE Storage]
+:revdate: 2025-05-20
+:page-revdate: {revdate}
+:experimental:
+
+ifdef::env-github[]
+:imagesdir: ../images/
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+SUSE Storage is a lightweight, reliable, and user-friendly distributed block storage system designed for Kubernetes. It is a product based on Longhorn, an open-source project initially developed by Rancher Labs and currently incubated under the CNCF.
+
+
+== Prerequisites
+
+If you are following this guide, it assumes that you have the following already available:
+
+* At least one host with SUSE Linux Micro {version-operatingsystem} installed; this can be physical or virtual
+* A Kubernetes cluster installed; either K3s or RKE2
+* Helm
+
+== Manual installation of SUSE Storage
+
+=== Installing Open-iSCSI
+
+A core requirement of deploying and using SUSE Storage is the installation of the `open-iscsi` package and the `iscsid` daemon running on all Kubernetes nodes.
+This is necessary, since Longhorn relies on `iscsiadm` on the host to provide persistent volumes to Kubernetes.
+
+Let's install it:
+
+[,shell]
+----
+transactional-update pkg install open-iscsi
+----
+
+It is important to note that once the operation is completed, the package is only installed into a new snapshot as SUSE Linux Micro is an immutable operating system.
+In order to load it and for the `iscsid` daemon to start running, we must reboot into that new snapshot that we just created.
+Issue the reboot command when you are ready:
+
+[,shell]
+----
+reboot
+----
+
+[TIP]
+====
+For additional help installing open-iscsi, refer to the {link-longhorn-iscsi}[official Longhorn documentation].
+====
+
+=== Installing SUSE Storage
+
+There are several ways to install SUSE Storage on your Kubernetes clusters.
+This guide will follow through the Helm installation, however feel free to follow the {link-longhorn-installation}[official documentation] if another approach is desired.
+
+. Log into the Rancher Application Collection:
++
+[,shell]
+----
+helm registry login dp.apps.rancher.io --username $APPS.RANCHER.IO_USERNAME --password $APPS.RANCHER.IO_ACCESS_TOKEN
+----
++
+. Install SUSE Storage in the `longhorn-system` namespace and add your container registry credentials:
++
+[,shell,subs="attributes"]
+----
+helm install longhorn oci://dp.apps.rancher.io/charts/suse-storage \
+  --version {version-longhorn-chart} \
+  --namespace longhorn-system \
+  --create-namespace \
+  --set privateRegistry.createSecret=true \
+  --set privateRegistry.registryUrl=dp.apps.rancher.io \
+  --set privateRegistry.registryUser=$APPS.RANCHER.IO_USERNAME \
+  --set privateRegistry.registryPasswd=$APPS.RANCHER.IO_ACCESS_TOKEN \
+  --set privateRegistry.registrySecret=application-collection
+----
++
+. Confirm that the deployment succeeded:
++
+[,shell]
+----
+kubectl -n longhorn-system get pods
+----
++
+[,console]
+----
+localhost:~ # kubectl -n longhorn-system get pods
+NAME                                                READY   STATUS    RESTARTS        AGE
+csi-attacher-7656559cf4-pkhh6                       1/1     Running   0               103s
+csi-attacher-7656559cf4-pnzw5                       1/1     Running   0               103s
+csi-attacher-7656559cf4-z94mm                       1/1     Running   0               103s
+csi-provisioner-6d9cf6456d-kcwtq                    1/1     Running   0               103s
+csi-provisioner-6d9cf6456d-mvvml                    1/1     Running   0               103s
+csi-provisioner-6d9cf6456d-q4f88                    1/1     Running   0               103s
+csi-resizer-f587cd467-clr2n                         1/1     Running   0               103s
+csi-resizer-f587cd467-z28v4                         1/1     Running   0               103s
+csi-resizer-f587cd467-zxmtx                         1/1     Running   0               103s
+csi-snapshotter-6dcdf78684-757mg                    1/1     Running   0               103s
+csi-snapshotter-6dcdf78684-8ktgc                    1/1     Running   0               103s
+csi-snapshotter-6dcdf78684-ffsqr                    1/1     Running   0               103s
+engine-image-ei-099f845a-lvdtr                      1/1     Running   0               2m21s
+instance-manager-4adffddaffe02374cd5635b8a6113de7   1/1     Running   0               111s
+longhorn-csi-plugin-w7pwr                           3/3     Running   0               103s
+longhorn-driver-deployer-6886fb84bc-wm9h6           1/1     Running   2 (2m32s ago)   2m45s
+longhorn-manager-zblbl                              2/2     Running   0               2m45s
+longhorn-ui-6bcc65d4bd-mcn6r                        1/1     Running   0               2m45s
+longhorn-ui-6bcc65d4bd-rwf97                        1/1     Running   0               2m45s
+----
+
+== Creating SUSE Storage volumes
+
+SUSE Storage utilizes Kubernetes resources called `StorageClass` in order to automatically provision `PersistentVolume` objects for pods.
+Think of `StorageClass` as a way for administrators to describe the _classes_ or _profiles_ of storage they offer.
+
+Let's create a `StorageClass` with some default options:
+
+[,shell]
+----
+kubectl apply -f - <<EOF
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: longhorn-example
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+parameters:
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880" # 48 hours in minutes
+  fromBackup: ""
+  fsType: "ext4"
+EOF
+----
+
+Now that we have our `StorageClass` in place, we need a `PersistentVolumeClaim` referencing it.
+A `PersistentVolumeClaim` (PVC) is a request for storage by a user. PVCs consume `PersistentVolume` resources.
+Claims can request specific sizes and access modes (e.g., they can be mounted once read/write or many times read-only).
+
+Let's create a `PersistentVolumeClaim`:
+
+[,shell]
+----
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: longhorn-volv-pvc
+  namespace: longhorn-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-example
+  resources:
+    requests:
+      storage: 2Gi
+EOF
+----
+
+That's it! Once we have the `PersistentVolumeClaim` created, we can proceed with attaching it to a `Pod`.
+When the `Pod` is deployed, Kubernetes creates the Longhorn volume and binds it to the `Pod` if storage is available.
+
+[,shell]
+----
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-test
+  namespace: longhorn-system
+spec:
+  containers:
+  - name: volume-test
+    image: nginx:stable-alpine
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: volv
+      mountPath: /data
+    ports:
+    - containerPort: 80
+  volumes:
+  - name: volv
+    persistentVolumeClaim:
+      claimName: longhorn-volv-pvc
+EOF
+----
+
+[TIP]
+====
+The concept of storage in Kubernetes is a complex, but important topic. We briefly mentioned some of the most common Kubernetes resources,
+however, we suggest to familiarize yourself with the {link-longhorn-terminology}[terminology documentation] that Longhorn offers.
+====
+
+In this example, the result should look something like this:
+
+[,console]
+----
+localhost:~ # kubectl get storageclass
+NAME                 PROVISIONER          RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+longhorn (default)   driver.longhorn.io   Delete          Immediate           true                   12m
+longhorn-example     driver.longhorn.io   Delete          Immediate           true                   24s
+
+localhost:~ # kubectl get pvc -n longhorn-system
+NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS       AGE
+longhorn-volv-pvc   Bound    pvc-f663a92e-ac32-49ae-b8e5-8a6cc29a7d1e   2Gi        RWO            longhorn-example   54s
+
+localhost:~ # kubectl get pods -n longhorn-system
+NAME                                                READY   STATUS    RESTARTS      AGE
+csi-attacher-5c4bfdcf59-qmjtz                       1/1     Running   0             14m
+csi-attacher-5c4bfdcf59-s7n65                       1/1     Running   0             14m
+csi-attacher-5c4bfdcf59-w9xgs                       1/1     Running   0             14m
+csi-provisioner-667796df57-fmz2d                    1/1     Running   0             14m
+csi-provisioner-667796df57-p7rjr                    1/1     Running   0             14m
+csi-provisioner-667796df57-w9fdq                    1/1     Running   0             14m
+csi-resizer-694f8f5f64-2rb8v                        1/1     Running   0             14m
+csi-resizer-694f8f5f64-z9v9x                        1/1     Running   0             14m
+csi-resizer-694f8f5f64-zlncz                        1/1     Running   0             14m
+csi-snapshotter-959b69d4b-5dpvj                     1/1     Running   0             14m
+csi-snapshotter-959b69d4b-lwwkv                     1/1     Running   0             14m
+csi-snapshotter-959b69d4b-tzhwc                     1/1     Running   0             14m
+engine-image-ei-5cefaf2b-hvdv5                      1/1     Running   0             14m
+instance-manager-0ee452a2e9583753e35ad00602250c5b   1/1     Running   0             14m
+longhorn-csi-plugin-gd2jx                           3/3     Running   0             14m
+longhorn-driver-deployer-9f4fc86-j6h2b              1/1     Running   0             15m
+longhorn-manager-z4lnl                              1/1     Running   0             15m
+longhorn-ui-5f4b7bbf69-bln7h                        1/1     Running   3 (14m ago)   15m
+longhorn-ui-5f4b7bbf69-lh97n                        1/1     Running   3 (14m ago)   15m
+volume-test                                         1/1     Running   0             26s
+----
+
+== Accessing the UI
+
+If you installed SUSE Storage with kubectl or Helm, you need to set up an Ingress controller to
+allow external traffic into the cluster. Authentication is not enabled by
+default. If the Rancher catalog app was used, Rancher automatically created an Ingress controller with
+access control (the rancher-proxy).
+
+. Get the Longhorn’s external service IP address:
++
+[,console]
+----
+kubectl -n longhorn-system get svc
+----
++
+. Once you have retrieved the `longhorn-frontend` IP address, you can start using the UI by navigating to it in your browser.
+
+== Installing with Edge Image Builder
+
+SUSE Edge is using <<components-eib>> in order to customize base SUSE Linux Micro OS images.
+We are going to demonstrate how to do so for provisioning an RKE2 cluster with SUSE Storage on top of it.
+
+Let's create the definition file:
+
+[,shell,subs="attributes,specialchars"]
+----
+export CONFIG_DIR=$HOME/eib
+mkdir -p $CONFIG_DIR
+
+cat << EOF > $CONFIG_DIR/iso-definition.yaml
+apiVersion: {version-eib-api-latest}
+image:
+  imageType: iso
+  baseImage: {micro-base-image-iso}
+  arch: x86_64
+  outputImageName: eib-image.iso
+kubernetes:
+  version: {version-kubernetes-rke2}
+  helm:
+    charts:
+      - name: suse-storage
+        releaseName: longhorn
+        version: {version-longhorn-chart}
+        repositoryName: rancher-application-collection
+        targetNamespace: longhorn-system
+        createNamespace: true
+        installationNamespace: kube-system
+    repositories:
+      - name: rancher-application-collection
+        url: oci://dp.apps.rancher.io/charts
+        authentication:
+          username: $APPS.RANCHER.IO_USERNAME
+          password: $APPS.RANCHER.IO_ACCESS_TOKEN
+embeddedArtifactRegistry:
+  registries:
+    - uri: dp.apps.rancher.io
+      authentication:
+        username: $APPS.RANCHER.IO_USERNAME
+        password: $APPS.RANCHER.IO_ACCESS_TOKEN
+  images:
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-external-attacher:4.10.0-8.8
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-external-provisioner:5.3.0-8.8
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-external-resizer:1.14.0-8.8
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-external-snapshotter:8.4.0-8.9
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-livenessprobe:2.17.0-8.8
+    - name: dp.apps.rancher.io/containers/kubernetes-csi-node-driver-registrar:2.15.0-8.8
+    - name: dp.apps.rancher.io/containers/longhorn-backing-image-manager:1.10.1-1.11
+    - name: dp.apps.rancher.io/containers/longhorn-engine:1.10.1-1.16
+    - name: dp.apps.rancher.io/containers/longhorn-instance-manager:1.10.1-1.17
+    - name: dp.apps.rancher.io/containers/longhorn-manager:1.10.1-1.9
+    - name: dp.apps.rancher.io/containers/longhorn-share-manager:1.10.1-1.8
+    - name: dp.apps.rancher.io/containers/longhorn-ui:1.10.1-1.8
+    - name: dp.apps.rancher.io/containers/rancher-support-bundle-kit:0.0.71-4.13
+operatingSystem:
+  packages:
+    sccRegistrationCode: <reg-code>
+    packageList:
+      - open-iscsi
+  users:
+  - username: root
+    encryptedPassword: \$6\$jHugJNNd3HElGsUZ\$eodjVe4te5ps44SVcWshdfWizrP.xAyd71CVEXazBJ/.v799/WRCBXxfYmunlBO2yp1hm/zb4r8EmnrrNCF.P/
+EOF
+----
+
+[NOTE]
+====
+Customizing any of the Helm chart values is possible via a separate file provided under `helm.charts[].valuesFile`.
+Refer to the {link-eib-building-images-k8s}[upstream documentation] for details.
+====
+
+Let's build the image:
+
+[,shell,subs="attributes"]
+----
+podman run --rm --privileged -it -v $CONFIG_DIR:/eib registry.suse.com/edge/{version-edge-registry}/edge-image-builder:{version-eib} build --definition-file $CONFIG_DIR/iso-definition.yaml
+----
+
+After the image is built, you can use it to install your OS on a physical or virtual host.
+Once the provisioning is complete, you are able to log in to the system using the `root:eib` credentials pair.
+
+Ensure that SUSE Storage has been successfully deployed:
+
+[,console]
+----
+localhost:~ # /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml -n longhorn-system get pods
+NAME                                                READY   STATUS    RESTARTS        AGE
+csi-attacher-5c4bfdcf59-qmjtz                       1/1     Running   0               103s
+csi-attacher-5c4bfdcf59-s7n65                       1/1     Running   0               103s
+csi-attacher-5c4bfdcf59-w9xgs                       1/1     Running   0               103s
+csi-provisioner-667796df57-fmz2d                    1/1     Running   0               103s
+csi-provisioner-667796df57-p7rjr                    1/1     Running   0               103s
+csi-provisioner-667796df57-w9fdq                    1/1     Running   0               103s
+csi-resizer-694f8f5f64-2rb8v                        1/1     Running   0               103s
+csi-resizer-694f8f5f64-z9v9x                        1/1     Running   0               103s
+csi-resizer-694f8f5f64-zlncz                        1/1     Running   0               103s
+csi-snapshotter-959b69d4b-5dpvj                     1/1     Running   0               103s
+csi-snapshotter-959b69d4b-lwwkv                     1/1     Running   0               103s
+csi-snapshotter-959b69d4b-tzhwc                     1/1     Running   0               103s
+engine-image-ei-5cefaf2b-hvdv5                      1/1     Running   0               109s
+instance-manager-0ee452a2e9583753e35ad00602250c5b   1/1     Running   0               109s
+longhorn-csi-plugin-gd2jx                           3/3     Running   0               103s
+longhorn-driver-deployer-9f4fc86-j6h2b              1/1     Running   0               2m28s
+longhorn-manager-z4lnl                              1/1     Running   0               2m28s
+longhorn-ui-5f4b7bbf69-bln7h                        1/1     Running   3 (2m7s ago)    2m28s
+longhorn-ui-5f4b7bbf69-lh97n                        1/1     Running   3 (2m10s ago)   2m28s
+----
+
+[NOTE]
+====
+This installation will not work for completely air-gapped environments.
+In those cases, please refer to <<suse-storage-install>>.
+====
