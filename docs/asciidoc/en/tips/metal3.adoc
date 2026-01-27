@@ -1,0 +1,130 @@
+[#tips-metal3]
+= *Metal^3^*
+:revdate: 2025-10-07
+:page-revdate: {revdate}
+:experimental:
+
+ifdef::env-github[]
+:imagesdir: ../images/
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+:imagesdir: ../images/
+
+== `BareMetalHost` selection and Cluster association
+
+Once a Metalˆ3ˆ cluster object and its corresponding associated objects are created, a process to choose which `BareMetalHost` will be part of
+the cluster is performed.
+This process connects a `BareMetalHost` with a specific `Metal3MachineTemplate` using standard
+https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/[Kubernetes labels] and selectors.
+
+As an example, each `BareMetalHost` is labeled to identify its properties and intended cluster
+(e.g., its cluster-role, the cluster name, location, etc.):
+
+----
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: mynode1
+  labels:
+    cluster-role: control-plane
+    cluster: foobar
+    location: madrid
+    datacenter: xyz
+<snip>
+---
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: mynode2
+  labels:
+    cluster-role: worker
+    cluster: foobar
+    location: madrid
+    datacenter: xyz
+<snip>
+---
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: mynode3
+  labels:
+    cluster-role: worker
+    cluster: foobar2
+    location: madrid
+    datacenter: xyz
+<snip>
+...
+----
+
+Then, the `Metal3MachineTemplate` object uses the https://doc.crds.dev/github.com/metal3-io/cluster-api-provider-metal3/infrastructure.cluster.x-k8s.io/Metal3MachineTemplate/{version-capi-provider-metal3}#spec-template-spec-hostSelector[`spec.hostSelector`] field to match the desired `BareMetalHost`.
+
+Both https://doc.crds.dev/github.com/metal3-io/cluster-api-provider-metal3/infrastructure.cluster.x-k8s.io/Metal3MachineTemplate/{version-capi-provider-metal3}#spec-template-spec-hostSelector-matchLabels[`matchLabels`] (for exact key-value matching) and https://doc.crds.dev/github.com/metal3-io/cluster-api-provider-metal3/infrastructure.cluster.x-k8s.io/Metal3MachineTemplate/{version-capi-provider-metal3}#spec-template-spec-hostSelector-matchExpressions[`matchExpressions`] (for more complex rules) can be used:
+
+----
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Metal3MachineTemplate
+metadata:
+  name: foobar-cluster-controlplane
+  namespace: mynamespace
+spec:
+  template:
+    spec:
+      hostSelector:
+        matchLabels:
+          cluster-role: control-plane
+          cluster: foobar
+<snip>
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Metal3MachineTemplate
+metadata:
+  name: foobar-cluster-worker
+  namespace: mynamespace
+spec:
+  template:
+    spec:
+      hostSelector:
+        matchExpressions:
+          - { key: cluster-role, operator: In, values: [worker] }
+          - { key: cluster, operator: In, values: [foobar] }
+<snip>
+----
+
+[NOTE]
+====
+Kubernetes namespaces can be also used to better organize the different objects.
+====
+
+== Clean up old EFI boot entries
+
+Sometimes, the https://en.wikipedia.org/wiki/UEFI#UEFI_booting[UEFI boot manager] contains multiple entries for older operating systems that are probably not needed anymore (especially for host being re-provisioned multiple times).
+You can clean up those old entries by following any of the following procedures:
+
+* Delete them on the BIOS/EFI setup interface directly (the exact procedure will depend on the hardware).
+* Run the UEFI https://uefi.org/sites/default/files/resources/UEFI_Shell_2_2.pdf[`bcfg`] shell as:
++
+----
+# List the entries
+bcfg boot dump -b
+# Delete entry number X
+bcfg boot rm X
+# X is the number associated the entry to remove. For example, if the entry is "Boot0002 foobar", then X is 2.
+----
+
+* Use `efibootmgr` on a Linux system as:
++
+----
+# List the entries
+efibootmgr -v
+# Delete entry number X
+efibootmgr -b X -B 
+----
+
+The process may leave orphaned files on the EFI System Partition (ESP), usually found under subdirectories named by the vendor (e.g., `EFI/opensuse` or `EFI/Microsoft`).
+While these files are generally harmless, they should be deleted if they consume excessive space as it can prevent the installation of a new OS or a boot manager update.
+Removal may require explicitly mounting the ESP, typically mounted as `/boot/efi/EFI` on Linux systems.
