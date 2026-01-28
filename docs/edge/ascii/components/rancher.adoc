@@ -1,0 +1,74 @@
+[#components-rancher]
+= Rancher
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+:experimental:
+
+ifdef::env-github[]
+:imagesdir: ../images/
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+
+See Rancher documentation at https://ranchermanager.docs.rancher.com/{rancher-docs-version}.
+
+[quote]
+____
+Rancher is a powerful open-source Kubernetes management platform that streamlines the deployment, operations and monitoring of Kubernetes clusters across multiple environments. Whether you manage clusters on premises, in the cloud, or at the edge, Rancher provides a unified and centralized platform for all your Kubernetes needs.
+____
+
+
+== Key Features of Rancher
+
+* **Multi-cluster management:** Rancher's intuitive interface lets you manage Kubernetes clusters from anywhere—public clouds, private data centers and edge locations.
+* **Security and compliance:** Rancher enforces security policies, role-based access control (RBAC), and compliance standards across your Kubernetes landscape.
+* **Simplified cluster operations:** Rancher automates cluster provisioning, upgrades and troubleshooting, simplifying Kubernetes operations for teams of all sizes.
+* **Centralized application catalog:** The Rancher application catalog offers a diverse range of Helm charts and Kubernetes Operators, making it easy to deploy and manage containerized applications.
+* **Continuous delivery:** Rancher supports GitOps and CI/CD pipelines, enabling automated and streamlined application delivery processes.
+
+== Rancher's use in SUSE Edge
+
+Rancher provides several core functionalities to the SUSE Edge stack:
+
+=== Centralized Kubernetes management
+
+In typical edge deployments with numerous distributed clusters, Rancher acts as a central control plane for managing these Kubernetes clusters. It offers a unified interface for provisioning, upgrading, monitoring, and troubleshooting, simplifying operations, and ensuring consistency.
+
+=== Simplified cluster deployment
+
+Rancher streamlines Kubernetes cluster creation on the lightweight SUSE Linux Micro operating system, easing the rollout of edge infrastructure with robust Kubernetes capabilities.
+
+=== Application deployment and management
+
+The integrated Rancher application catalog can simplify deploying and managing containerized applications across SUSE Edge clusters, enabling seamless edge workload deployment.
+
+=== Security and policy enforcement
+
+Rancher provides policy-based governance tools, role-based access control (RBAC), and integration with external authentication providers. This helps SUSE Edge deployments maintain security and compliance, critical in distributed environments.
+
+== Best practices
+
+=== GitOps
+
+Rancher includes Fleet as a built-in component to allow manage cluster configurations and application deployments with code stored in git. 
+
+=== Observability
+
+Rancher includes built-in monitoring and logging tools like Prometheus and Grafana for comprehensive insights into your cluster health and performance.
+
+== Installing with Edge Image Builder
+
+SUSE Edge is using <<components-eib>> in order to customize base SUSE Linux Micro OS images.
+Follow <<rancher-install>> for an air-gapped installation of Rancher on top of Kubernetes clusters provisioned by EIB.
+
+== Additional Resources
+
+* https://rancher.com/docs/[Rancher Documentation]
+* https://www.rancher.academy/[Rancher Academy]
+* https://rancher.com/community/[Rancher Community]
+* https://helm.sh/[Helm Charts]
+* https://operatorhub.io/[Kubernetes Operators]
